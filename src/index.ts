@@ -1,16 +1,12 @@
 import express from "express";
-import pinoHttp from "pino-http";
-const pino = pinoHttp as any;
 import { createBot } from "./bot/index.js";
 import { config } from "./config.js";
-import { logger } from "./utils/logger.js";
 
 async function bootstrap() {
   const bot = createBot();
   const app = express();
 
   app.use(express.json());
-  app.use(pino({ logger }));
 
   app.get("/health", (_req, res) => {
     res.status(200).json({ ok: true });
@@ -29,12 +25,12 @@ async function bootstrap() {
     });
 
     app.listen(config.PORT, () => {
-      logger.info({ port: config.PORT }, "Webhook server started");
+      console.log(`Webhook server started on ${config.PORT}`);
     });
   } else {
     await bot.launch();
     app.listen(config.PORT, () => {
-      logger.info({ port: config.PORT }, "Polling bot started");
+      console.log(`Polling bot started on ${config.PORT}`);
     });
   }
 
@@ -48,6 +44,6 @@ async function bootstrap() {
 }
 
 bootstrap().catch((error) => {
-  logger.error({ error }, "Failed to bootstrap application");
+  console.error("Failed to bootstrap application", error);
   process.exit(1);
 });
