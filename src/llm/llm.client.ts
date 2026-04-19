@@ -1,79 +1,79 @@
-import OpenAI from "openai";
-import { z } from "zod";
-import { config } from "../config.js";
-import { logger } from "../utils/logger.js";
-import { SYSTEM_PROMPT, buildUserPrompt } from "./prompts.js";
 import type { HeadlineResponse, MediaPackResponse, Mode } from "../types/index.js";
 
-const headlineSchema = z.object({
-  official: z.array(z.string()).length(4),
-  loud: z.array(z.string()).length(3),
-  social: z.array(z.string()).length(3)
-});
-
-const mediaPackSchema = headlineSchema.extend({
-  lead: z.string().min(1),
-  telegram_post: z.string().min(1),
-  short_news: z.string().min(1),
-  announcement: z.string().min(1)
-});
-
-const client = new OpenAI({
-  apiKey: config.OPENAI_API_KEY,
-  baseURL: config.OPENAI_BASE_URL,
-  timeout: config.LLM_TIMEOUT_MS
-});
-
-function dedupe(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+function cleanText(text: string) {
+  return text.replace(/\s+/g, " ").trim();
 }
 
-function repairHeadlineResult(data: HeadlineResponse): HeadlineResponse {
-  const official = dedupe(data.official).slice(0, 4);
-  const loud = dedupe(data.loud).slice(0, 3);
-  const social = dedupe(data.social).slice(0, 3);
+function firstSentence(text: string) {
+  const cleaned = cleanText(text);
+  const parts = cleaned.split(/[.!?]/).map((p) => p.trim()).filter(Boolean);
+  return parts[0] || cleaned.slice(0, 120) || "В Тульской области произошло важное событие";
+}
 
-  while (official.length < 4) official.push(official[official.length - 1] || "В Тульской области состоялось важное событие");
-  while (loud.length < 3) loud.push(loud[loud.length - 1] || "В регионе произошло заметное событие");
-  while (social.length < 3) social.push(social[social.length - 1] || "Событие, о котором будут говорить");
+function shortTopic(text: string) {
+  const sentence = firstSentence(text);
+  return sentence.length > 90 ? sentence.slice(0, 90).trim() + "..." : sentence;
+}
 
-  return { official, loud, social };
+function buildHeadlines(text: string): HeadlineResponse {
+  const topic = shortTopic(text);
+
+  return {
+    official: [
+      topic,
+      `В Тульской области состоялось событие по теме: ${topic}`,
+      `Дмитрий Миляев обсудил вопрос по теме: ${topic}`,
+      `В регионе продолжена работа по направлению: ${topic}`
+    ],
+    loud: [
+      `Миляев обсудил ключевые вопросы по теме: ${topic}`,
+      `В Тульской области усиливают работу по теме: ${topic}`,
+      `Тула делает следующий шаг в теме: ${topic}`
+    ],
+    social: [
+      `Что важно знать: ${topic}`,
+      `Тула в деле: ${topic}`,
+      `Коротко о главном: ${topic}`
+    ]
+  };
 }
 
 export async function generateContent(text: string, mode: Mode): Promise<HeadlineResponse | MediaPackResponse> {
-  const completion = await client.chat.completions.create({
-    model: config.OPENAI_MODEL,
-    temperature: 0.9,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: buildUserPrompt(text, mode) }
-    ]
-  });
-
-  const raw = completion.choices[0]?.message?.content;
-  if (!raw) {
-    throw new Error("LLM returned empty content");
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    logger.error({ error, raw }, "Failed to parse LLM JSON");
-    throw new Error("LLM returned invalid JSON");
-  }
+  const headlines = buildHeadlines(text);
 
   if (mode === "mediapack") {
-    const result = mediaPackSchema.parse(parsed);
     return {
-      ...repairHeadlineResult(result),
-      lead: result.lead.trim(),
-      telegram_post: result.telegram_post.trim(),
-      short_news: result.short_news.trim(),
-      announcement: result.announcement.trim()
+      ...headlines,
+      lead: `В Тульской области продолжается работа по теме: ${shortTopic(text)}.`,
+      telegram_post: `Главное по теме: ${shortTopic(text)}.\n\nПодготовили варианты заголовков и краткую выжимку.`,
+      short_news: `В регионе продолжается работа по теме: ${shortTopic(text)}.`,
+      announcement: `В Тульской области продолжается работа по теме: ${shortTopic(text)}.`
     };
   }
 
-  return repairHeadlineResult(headlineSchema.parse(parsed));
+  if (mode === "official") {
+    return {
+      official: headlines.official,
+      loud: headlines.official.slice(0, 3),
+      social: headlines.official.slice(0, 3)
+    };
+  }
+
+  if (mode === "loud") {
+    return {
+      official: headlines.loud.concat(headlines.official[0]).slice(0, 4),
+      loud: headlines.loud,
+      social: headlines.loud
+    };
+  }
+
+  if (mode === "social" || mode === "short") {
+    return {
+      official: headlines.social.concat(headlines.official[0]).slice(0, 4),
+      loud: headlines.social,
+      social: headlines.social
+    };
+  }
+
+  return headlines;
 }
