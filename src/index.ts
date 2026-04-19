@@ -1,5 +1,6 @@
 import express from "express";
 import pinoHttp from "pino-http";
+const pino = pinoHttp as any;
 import { createBot } from "./bot/index.js";
 import { config } from "./config.js";
 import { logger } from "./utils/logger.js";
