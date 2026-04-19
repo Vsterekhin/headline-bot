@@ -10,7 +10,7 @@ async function bootstrap() {
   const app = express();
 
   app.use(express.json());
-  app.use(pinoHttp({ logger }));
+  app.use(pino({ logger }));
 
   app.get("/health", (_req, res) => {
     res.status(200).json({ ok: true });
